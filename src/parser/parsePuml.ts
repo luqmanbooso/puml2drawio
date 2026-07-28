@@ -1,193 +1,143 @@
-import * as plantumlParserPkg from 'plantuml-parser';
+import { ParsedGraph, ParsedNode, ParsedEdge } from '../types';
 
-const parse =
-  plantumlParserPkg.parse || (plantumlParserPkg as any).default?.parse;
+export function parsePuml(pumlCode: string): ParsedGraph {
+  const nodes: ParsedNode[] = [];
+  const edges: ParsedEdge[] = [];
+  const containers: ParsedNode[] = [];
+  const processedNodeIds = new Set<string>();
 
-export interface ParsedNode {
-  id: string;
-  label: string;
-  type?: string;
-  parentId?: string;
-  isContainer?: boolean;
-}
+  // Clean code & remove single/multi-line comments
+  let cleanCode = pumlCode
+    .replace(/\/'[\s\S]*?'\//g, '')
+    .replace(/'[^\n]*/g, '');
 
-export interface ParsedEdge {
-  source: string;
-  target: string;
-  label?: string;
-}
+  // -------------------------------------------------------------
+  // PASS 1: Extract Compartment Blocks (class "Name" { ... }, enum { ... })
+  // -------------------------------------------------------------
+  const blockRegex = /(class|enum)\s+(?:"([^"]+)"\s+as\s+)?([A-Za-z0-9_]+)(?:\s+as\s+([A-Za-z0-9_]+))?\s*\{([^}]*)\}/g;
+  let match: RegExpExecArray | null;
 
-export interface ParsedGraph {
-  nodes: ParsedNode[];
-  edges: ParsedEdge[];
-}
+  while ((match = blockRegex.exec(cleanCode)) !== null) {
+    const keyword = match[1] as 'class' | 'enum';
+    const labelQuoted = match[2];
+    const rawId = match[3];
+    const aliasId = match[4];
+    const bodyText = match[5];
 
-function extractName(val: any): string {
-  if (!val) return '';
-  if (typeof val === 'string') return val.trim();
-  if (typeof val === 'object') {
-    return (val.name || val.title || val.label || val.id || val.alias || '').trim();
+    const id = aliasId || rawId;
+    const label = labelQuoted || rawId;
+
+    const attributes: string[] = [];
+    const methods: string[] = [];
+    const members: string[] = [];
+
+    const lines = bodyText.split('\n').map((l) => l.trim()).filter(Boolean);
+
+    for (const line of lines) {
+      if (keyword === 'enum') {
+        members.push(line);
+      } else if (line.includes('(') && line.includes(')')) {
+        methods.push(line);
+      } else {
+        attributes.push(line);
+      }
+    }
+
+    nodes.push({
+      id,
+      label,
+      type: keyword,
+      attributes,
+      methods,
+      members,
+    });
+
+    processedNodeIds.add(id);
   }
-  return String(val).trim();
-}
 
-/**
- * Pre-parses shape declarations and nested containers (packages, nodes, clouds, etc.)
- */
-function preParsePuml(pumlText: string): Map<string, ParsedNode> {
-  const nodesMap = new Map<string, ParsedNode>();
-  const lines = pumlText.split('\n');
+  // Remove parsed block bodies to simplify line-by-line parsing
+  cleanCode = cleanCode.replace(blockRegex, '');
 
-  const containerStack: string[] = [];
+  // -------------------------------------------------------------
+  // PASS 2: Line-by-Line Parsing (Containers, Nodes, Relationships)
+  // -------------------------------------------------------------
+  const lines = cleanCode.split('\n').map((l) => l.trim()).filter(Boolean);
+  let activeContainerId: string | undefined = undefined;
 
-  const containerKeywords = 'package|node|rectangle|folder|frame|cloud|database|cluster';
-  const shapeKeywords = [
-    'actor', 'person', 'agent', 'artifact', 'boundary', 'card', 'cloud',
-    'component', 'control', 'database', 'entity', 'file', 'folder', 'frame',
-    'hexagon', 'interface', 'node', 'package', 'queue', 'rectangle', 'stack',
-    'storage', 'usecase'
-  ].join('|');
+  for (const line of lines) {
+    if (line.startsWith('@startuml') || line.startsWith('@enduml')) continue;
 
-  // Regex patterns
-  const containerStartRegex = new RegExp(
-    `^\\s*(${containerKeywords})\\s+(?:"([^"]+)"(?:\\s+as\\s+([A-Za-z0-9_\\-\\.]+))?|([A-Za-z0-9_\\-\\.]+))\\s*\\{\\s*$`,
-    'i'
-  );
+    // Detect Container Start
+    const containerMatch = line.match(/^(package|rectangle)\s+(?:"([^"]+)"\s+as\s+)?([A-Za-z0-9_]+)/);
+    if (containerMatch && !line.includes('{')) {
+      const cId = containerMatch[3];
+      const cLabel = containerMatch[2] || cId;
+      containers.push({ id: cId, label: cLabel, type: 'package' });
+      activeContainerId = cId;
+      continue;
+    }
 
-  const patternAs = new RegExp(
-    `^\\s*(${shapeKeywords})\\s+"([^"]+)"(?:\\s*<<[^>]+>>)?\\s+as\\s+([A-Za-z0-9_\\-\\.]+)\\s*$`, 'i'
-  );
-  const patternAliasLabel = new RegExp(
-    `^\\s*(${shapeKeywords})\\s+([A-Za-z0-9_\\-\\.]+)\\s+"([^"]+)"\\s*$`, 'i'
-  );
-  const patternLabelOnly = new RegExp(
-    `^\\s*(${shapeKeywords})\\s+"([^"]+)"\\s*$`, 'i'
-  );
-  const patternIdOnly = new RegExp(
-    `^\\s*(${shapeKeywords})\\s+([A-Za-z0-9_\\-\\.]+)\\s*$`, 'i'
-  );
+    if (line === '}') {
+      activeContainerId = undefined;
+      continue;
+    }
 
-  const patternBracketComponent = /^\s*\[([^\]]+)\](?:\s+as\s+([A-Za-z0-9_\-\.]+))?\s*$/i;
-  const patternParenUsecase = /^\s*\(([^\)]+)\)(?:\s+as\s+([A-Za-z0-9_\-\.]+))?\s*$/i;
+    // Detect Class without body (e.g. class Customer)
+    const singleClassMatch = line.match(/^(class|enum)\s+(?:"([^"]+)"\s+as\s+)?([A-Za-z0-9_]+)/);
+    if (singleClassMatch) {
+      const id = singleClassMatch[3];
+      const label = singleClassMatch[2] || id;
+      if (!processedNodeIds.has(id)) {
+        nodes.push({ id, label, type: singleClassMatch[1] as any, parentId: activeContainerId });
+        processedNodeIds.add(id);
+      }
+      continue;
+    }
 
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('\'') || line.startsWith('@')) continue;
+    // Detect Relationships (Handles <|--, *--, o--, ..>, cardinalities "1" -- "0..*", and labels)
+    const relRegex = /^([A-Za-z0-9_]+)\s*(?:"([^"]+)")?\s*(<\|--|--\|>|\*--|--\*|o--|--o|\.\.>|<\.\.|-->|<--|--)\s*(?:"([^"]+)")?\s*([A-Za-z0-9_]+)(?:\s*:\s*(.+))?$/;
+    const relMatch = line.match(relRegex);
 
-    const currentParent = containerStack.length > 0 ? containerStack[containerStack.length - 1] : undefined;
+    if (relMatch) {
+      const source = relMatch[1];
+      const fromCard = relMatch[2];
+      const relType = relMatch[3];
+      const toCard = relMatch[4];
+      const target = relMatch[5];
+      const label = relMatch[6]?.trim();
 
-    // 1. Check Container Open `{`
-    const containerMatch = line.match(containerStartRegex);
-    if (containerMatch) {
-      const type = containerMatch[1].toLowerCase();
-      const label = containerMatch[2] || containerMatch[4];
-      const id = containerMatch[3] || containerMatch[4] || containerMatch[2];
-
-      nodesMap.set(id, {
-        id,
-        label,
-        type,
-        parentId: currentParent,
-        isContainer: true,
+      // Ensure nodes exist if implicitly referenced in a relationship
+      [source, target].forEach((nodeId) => {
+        if (!processedNodeIds.has(nodeId)) {
+          nodes.push({ id: nodeId, label: nodeId, type: 'class', parentId: activeContainerId });
+          processedNodeIds.add(nodeId);
+        }
       });
 
-      containerStack.push(id);
+      edges.push({
+        id: `e_${source}_${target}_${edges.length}`,
+        source,
+        target,
+        relType,
+        fromCardinality: fromCard,
+        toCardinality: toCard,
+        label,
+      });
       continue;
     }
 
-    // 2. Check Container Close `}`
-    if (line === '}') {
-      containerStack.pop();
-      continue;
-    }
-
-    // 3. Regular Shape Declarations inside or outside containers
-    let match = line.match(patternAs);
-    if (match) {
-      const [, type, label, id] = match;
-      nodesMap.set(id, { id, label, type: type.toLowerCase(), parentId: currentParent });
-      continue;
-    }
-
-    match = line.match(patternAliasLabel);
-    if (match) {
-      const [, type, id, label] = match;
-      nodesMap.set(id, { id, label, type: type.toLowerCase(), parentId: currentParent });
-      continue;
-    }
-
-    match = line.match(patternLabelOnly);
-    if (match) {
-      const [, type, label] = match;
-      nodesMap.set(label, { id: label, label, type: type.toLowerCase(), parentId: currentParent });
-      continue;
-    }
-
-    match = line.match(patternIdOnly);
-    if (match) {
-      const [, type, id] = match;
-      nodesMap.set(id, { id, label: id, type: type.toLowerCase(), parentId: currentParent });
-      continue;
-    }
-
-    match = line.match(patternBracketComponent);
-    if (match) {
-      const [, label, alias] = match;
-      const id = alias || label;
-      nodesMap.set(id, { id, label, type: 'component', parentId: currentParent });
-      continue;
-    }
-
-    match = line.match(patternParenUsecase);
-    if (match) {
-      const [, label, alias] = match;
-      const id = alias || label;
-      nodesMap.set(id, { id, label, type: 'usecase', parentId: currentParent });
-      continue;
-    }
-  }
-
-  return nodesMap;
-}
-
-export function parsePuml(pumlText: string): ParsedGraph {
-  const nodesMap = preParsePuml(pumlText);
-  const edges: ParsedEdge[] = [];
-
-  if (parse) {
-    try {
-      const ast = parse(pumlText);
-      for (const diagram of ast as any[]) {
-        if (!diagram.elements) continue;
-
-        for (const element of diagram.elements) {
-          const el = element as any;
-          const type = (el.type || '').toLowerCase();
-
-          if (type === 'relation' || type === 'relationship' || (el.left && el.right)) {
-            const source = extractName(el.left);
-            const target = extractName(el.right);
-            const label = extractName(el.label);
-
-            if (source && target) {
-              if (!nodesMap.has(source)) {
-                nodesMap.set(source, { id: source, label: source });
-              }
-              if (!nodesMap.has(target)) {
-                nodesMap.set(target, { id: target, label: target });
-              }
-              edges.push({ source, target, label });
-            }
-          }
-        }
+    // Standard Primitive Nodes (actor, database, node, etc.)
+    const primitiveMatch = line.match(/^(actor|database|queue|cloud|hexagon|folder|node|usecase)\s+(?:"([^"]+)"\s+as\s+)?([A-Za-z0-9_]+)/);
+    if (primitiveMatch) {
+      const type = primitiveMatch[1] as any;
+      const id = primitiveMatch[3];
+      const label = primitiveMatch[2] || id;
+      if (!processedNodeIds.has(id)) {
+        nodes.push({ id, label, type, parentId: activeContainerId });
+        processedNodeIds.add(id);
       }
-    } catch (e) {
-      console.warn('AST parser warning:', e);
     }
   }
 
-  return {
-    nodes: Array.from(nodesMap.values()),
-    edges,
-  };
+  return { nodes, edges, containers };
 }

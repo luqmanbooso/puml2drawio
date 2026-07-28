@@ -8,52 +8,87 @@ import { ThemeName } from './themes/themeManager';
 const samplePuml = `
 @startuml
 class "User" as User {
-  +id: Long
+  +id: String
   +name: String
   +email: String
-  +login(): void
+  +login(): boolean
+  +logout(): void
 }
 
-class "Customer" as Customer {
-  +shippingAddress: String
-  +checkout(): void
+class "Student" as Student {
+  +studentId: String
+  +gpa: double
+  +enroll(c: Course): void
 }
 
-class "Order" as Order {
-  +id: Long
-  +orderDate: Date
-  +totalAmount: double
-  +calculateTotal(): double
-}
-
-class "OrderItem" as Item {
-  +quantity: int
-  +price: double
-}
-
-class "Product" as Product {
-  +sku: String
+class "Instructor" as Instructor {
+  +employeeId: String
   +title: String
-  +price: double
-  +updateStock(qty: int): void
+  +createCourse(): Course
 }
 
-enum "OrderStatus" as Status {
-  PENDING
-  SHIPPED
-  DELIVERED
+class "Department" as Department {
+  +code: String
+  +name: String
 }
 
-User <|-- Customer
-Customer "1" -- "0..*" Order : places
-Order "1" *-- "1..*" Item : contains
-Item "*" -- "1" Product : references
-Order ..> Status : uses
+class "Course" as Course {
+  +courseId: String
+  +title: String
+  +credits: int
+  +publish(): void
+}
+
+class "Module" as Module {
+  +title: String
+  +order: int
+}
+
+class "Assignment" as Assignment {
+  +dueDate: Date
+  +maxPoints: double
+  +calculateScore(): double
+}
+
+class "Submission" as Submission {
+  +submittedAt: Date
+  +fileUrl: String
+  +grade: double
+}
+
+enum "CourseStatus" as Status {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+class "NotificationService" as NotifService {
+  +sendEmail(to: String): void
+}
+
+' 1. Inheritance / Generalization (<|--)
+User <|-- Student
+User <|-- Instructor
+
+' 2. Composition (*--) [Parent controls lifecycle of child]
+Course "1" *-- "1..*" Module : contains
+Assignment "1" *-- "0..*" Submission : receives
+
+' 3. Aggregation (o--) [Independent lifecycle association]
+Department "1" o-- "0..*" Instructor : employs
+Department "1" o-- "0..*" Course : offers
+Course "0..*" o-- "0..*" Student : enrolledIn
+
+' 4. Directed Association (-->)
+Student "1" --> "0..*" Submission : creates
+
+' 5. Dependency (..>)
+Instructor ..> NotifService : uses
+Course ..> Status : state
 @enduml
 `;
 
-// Try changing theme to 'dracula', 'aws', 'nord', 'monochrome', or 'classic'
-const SELECTED_THEME: ThemeName = 'monochrome';
+const SELECTED_THEME: ThemeName = 'classic';
 
 console.log(`🚀 Running PlantUML -> Draw.io Converter (Theme: ${SELECTED_THEME})...\n`);
 
@@ -64,4 +99,4 @@ const xmlOutput = buildMxGraph(layoutGraph, { theme: SELECTED_THEME });
 const outputPath = path.join(__dirname, '../output.drawio');
 fs.writeFileSync(outputPath, xmlOutput, 'utf8');
 
-console.log(`✅ Success! Diagram generated with [${SELECTED_THEME}] theme at: ${outputPath}`);
+console.log(`✅ Success! Class Diagram generated at: ${outputPath}`);

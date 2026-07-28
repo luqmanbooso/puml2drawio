@@ -1,159 +1,84 @@
 import * as dagrePkg from 'dagre';
-import { ParsedGraph } from '../parser/parsePuml';
+import { ParsedGraph } from '../types';
 
 const dagre = (dagrePkg as any).default || dagrePkg;
 
-export interface PositionedNode {
-  id: string;
-  label: string;
-  type?: string;
-  parentId?: string;
-  isContainer?: boolean;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface PositionedEdge {
-  source: string;
-  target: string;
-  label?: string;
-  points?: { x: number; y: number }[];
-}
-
-export interface PositionedGraph {
-  nodes: PositionedNode[];
-  edges: PositionedEdge[];
-  width: number;
-  height: number;
-}
-
-export interface LayoutOptions {
-  rankdir?: 'TB' | 'LR' | 'BT' | 'RL';
-  nodesep?: number;
-  ranksep?: number;
-  nodeWidth?: number;
-  nodeHeight?: number;
-}
-
-export function calculateLayout(
-  parsedGraph: ParsedGraph,
-  options: LayoutOptions = {}
-): PositionedGraph {
-  // Enable compound graph mode for Dagre
+export function calculateLayout(graph: ParsedGraph) {
   const g = new dagre.graphlib.Graph({ compound: true });
 
   g.setGraph({
-  rankdir: options.rankdir || 'TB',
-  nodesep: 80, // Increased horizontal separation between siblings
-  ranksep: 90, // Increased vertical separation
-  marginx: 40,
-  marginy: 40,
-});
+    rankdir: 'TB',
+    nodesep: 70,
+    ranksep: 80,
+    marginx: 30,
+    marginy: 30,
+  });
 
   g.setDefaultEdgeLabel(() => ({}));
 
-  const baseWidth = options.nodeWidth || 140;
-  const baseHeight = options.nodeHeight || 60;
+  // Set Container Parent/Child Hierarchy
+  graph.containers.forEach((c) => {
+    g.setNode(c.id, { label: c.label, isContainer: true });
+  });
 
-  // 1. Register nodes and containers
-  for (const node of parsedGraph.nodes) {
-    if (node.isContainer) {
-      g.setNode(node.id, {
-        label: node.label,
-        paddingX: 30,
-        paddingY: 45, // Top padding for title header
-      });
-    } else {
-      const labelLen = node.label.length;
-      const nodeType = (node.type || '').toLowerCase();
+  // Calculate Node Dynamic Sizes
+  graph.nodes.forEach((node) => {
+    let width = 120;
+    let height = 70;
 
-      let width = Math.max(baseWidth, labelLen * 10 + 20);
-      let height = baseHeight;
+    if (node.type === 'class' || node.type === 'enum') {
+      const lineCount =
+        (node.attributes?.length || 0) +
+        (node.methods?.length || 0) +
+        (node.members?.length || 0);
 
-      if (nodeType === 'actor' || nodeType === 'person') {
-        width = 50;
-        height = 75;
-      } else if (nodeType === 'database' || nodeType === 'storage') {
-        width = 110;
-        height = 70;
-      } else if (nodeType === 'folder') {
-        width = 130;
-        height = 70;
-      }
+      // Dynamic height based on lines
+      height = Math.max(80, 45 + lineCount * 18);
 
-      g.setNode(node.id, { label: node.label, width, height });
+      // Dynamic width based on longest line string
+      const allLines = [
+        node.label,
+        ...(node.attributes || []),
+        ...(node.methods || []),
+        ...(node.members || []),
+      ];
+      const maxLen = Math.max(...allLines.map((l) => l.length));
+      width = Math.max(140, maxLen * 8 + 20);
+    } else if (node.type === 'actor') {
+      width = 50;
+      height = 75;
+    } else if (node.type === 'database') {
+      width = 110;
+      height = 70;
     }
+
+    g.setNode(node.id, {
+      width,
+      height,
+      label: node.label,
+      type: node.type,
+      attributes: node.attributes,
+      methods: node.methods,
+      members: node.members,
+      parentId: node.parentId,
+    });
 
     if (node.parentId) {
       g.setParent(node.id, node.parentId);
     }
-  }
+  });
 
-  // 2. Register edges
-  for (const edge of parsedGraph.edges) {
-    g.setEdge(edge.source, edge.target, { label: edge.label });
-  }
+  graph.edges.forEach((edge) => {
+    g.setEdge(edge.source, edge.target, {
+      id: edge.id,
+      label: edge.label,
+      relType: edge.relType,
+      fromCardinality: edge.fromCardinality,
+      toCardinality: edge.toCardinality,
+    });
+  });
 
-  // 3. Compute layout
   dagre.layout(g);
 
-  // 4. Calculate Absolute Positions
-  const absPosMap = new Map<string, { x: number; y: number; width: number; height: number }>();
-
-  for (const node of parsedGraph.nodes) {
-    const dNode = g.node(node.id);
-    if (!dNode) continue;
-    const w = Math.round(dNode.width);
-    const h = Math.round(dNode.height);
-    const absX = Math.round(dNode.x - w / 2);
-    const absY = Math.round(dNode.y - h / 2);
-
-    absPosMap.set(node.id, { x: absX, y: absY, width: w, height: h });
-  }
-
-  // 5. Convert Absolute -> Relative Coordinates for Children
-  const positionedNodes: PositionedNode[] = parsedGraph.nodes.map((node) => {
-    const absPos = absPosMap.get(node.id)!;
-    let relX = absPos.x;
-    let relY = absPos.y;
-
-    if (node.parentId && absPosMap.has(node.parentId)) {
-      const parentAbs = absPosMap.get(node.parentId)!;
-      relX = absPos.x - parentAbs.x;
-      relY = absPos.y - parentAbs.y;
-    }
-
-    return {
-      id: node.id,
-      label: node.label,
-      type: node.type,
-      parentId: node.parentId,
-      isContainer: node.isContainer,
-      x: relX,
-      y: relY,
-      width: absPos.width,
-      height: absPos.height,
-    };
-  });
-
-  const positionedEdges: PositionedEdge[] = parsedGraph.edges.map((edge) => {
-    const dEdge = g.edge(edge.source, edge.target);
-    return {
-      source: edge.source,
-      target: edge.target,
-      label: edge.label,
-      points: dEdge ? dEdge.points || [] : [],
-    };
-  });
-
-  const graphMeta = g.graph();
-
-  return {
-    nodes: positionedNodes,
-    edges: positionedEdges,
-    width: graphMeta.width || 0,
-    height: graphMeta.height || 0,
-  };
+  return { graph: g, raw: graph };
 }
