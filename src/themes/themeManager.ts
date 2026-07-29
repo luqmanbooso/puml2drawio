@@ -5,8 +5,8 @@ export interface ThemeColors {
   nodeFill: string;
   nodeStroke: string;
   nodeText: string;
-  containerFill: string;     // Header color
-  containerBodyFill: string; // Body color
+  containerFill: string;
+  containerBodyFill: string;
   containerStroke: string;
   containerText: string;
   edgeStroke: string;
@@ -15,7 +15,6 @@ export interface ThemeColors {
 }
 
 export const THEMES: Record<ThemeName, ThemeColors> = {
-  // 1. Classic Light
   classic: {
     canvasBg: '#ffffff',
     nodeFill: '#dae8fc',
@@ -29,8 +28,6 @@ export const THEMES: Record<ThemeName, ThemeColors> = {
     edgeText: '#000000',
     labelBg: '#ffffff',
   },
-
-  // 2. Dracula Dark Mode
   dracula: {
     canvasBg: '#282a36',
     nodeFill: '#44475a',
@@ -44,8 +41,6 @@ export const THEMES: Record<ThemeName, ThemeColors> = {
     edgeText: '#f8f8f2',
     labelBg: '#21222c',
   },
-
-  // 3. AWS Enterprise
   aws: {
     canvasBg: '#ffffff',
     nodeFill: '#ffffff',
@@ -59,8 +54,6 @@ export const THEMES: Record<ThemeName, ThemeColors> = {
     edgeText: '#232f3e',
     labelBg: '#ffffff',
   },
-
-  // 4. Nord Arctic
   nord: {
     canvasBg: '#2e3440',
     nodeFill: '#434c5e',
@@ -74,8 +67,6 @@ export const THEMES: Record<ThemeName, ThemeColors> = {
     edgeText: '#eceff4',
     labelBg: '#2e3440',
   },
-
-  // 5. Monochrome
   monochrome: {
     canvasBg: '#ffffff',
     nodeFill: '#ffffff',
