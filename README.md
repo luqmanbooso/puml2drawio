@@ -2,11 +2,7 @@
 
 > **Native, Client-Side PlantUML to mxGraph Diagram Engine**
 
----
-
-> ### 💬 A quick note before you start...
-> 
-> **Are you a student struggling with PlantUML generating static, uneditable images?**
+**Are you a student struggling with PlantUML generating static, uneditable images?**
 > Look, let’s be honest—we're not gonna sit here and act all dramatic telling you to draw every single rectangle, lifeline, and arrow manually in Draw.io. But wouldn't it be so much better if you could write clean, fast PlantUML code and get **actual, native, fully editable Draw.io components** out of it instead of just a flat PNG/SVG image?
 > **Well, you're at the right place.** PlantUML ➔ Draw.io Studio bridges that gap instantly right inside your browser.
 
